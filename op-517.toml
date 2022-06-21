@@ -1,0 +1,13 @@
+[enterprise]
+api_key = "${DD_API_KEY}"
+application_key = "${DD_APPLICATION_KEY}"
+configuration_key = "${DD_CONFIGURATION_KEY}"
+site = "datadoghq.com"
+
+[sources.foo]
+type = "demo_logs"
+format = "json"
+
+[sinks.bar]
+type = "blackhole"
+inputs = ["*"]

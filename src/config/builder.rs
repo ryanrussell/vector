@@ -311,6 +311,7 @@ impl ConfigBuilder {
             secret: self.secret.iter().map(|(k, v)| (k, v.as_ref())).collect(),
         })
         .expect("should serialize to JSON");
+        println!("hashable value: {:?}", value);
         let output = Sha256::digest(value.as_bytes());
 
         hex::encode(output)
