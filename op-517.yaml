@@ -1,0 +1,50 @@
+api:
+  address: 0.0.0.0:8686
+  enabled: true
+data_dir: /var/lib/vector
+enterprise:
+  api_key: "${DD_API_KEY}"
+  application_key: "${DD_APPLICATION_KEY}"
+  configuration_key: "${DD_CONFIGURATION_KEY}"
+  site: datadoghq.com
+sinks:
+  loki:
+    encoding:
+      codec: json
+    endpoint: https://localhost:1111 
+    inputs:
+    - application_log_transform
+    labels:
+      container_id: '{{ tag }}'
+      image: '{{ attrs.image }}'
+      ingest: aggregated-vector-dev
+      level: '{{ level }}'
+      module: '{{ module }}'
+      service: '{{ attrs.service_name }}'
+    out_of_order_action: rewrite_timestamp
+    remove_label_fields: true
+    type: loki
+sources:
+  application_log_ingress:
+    address: 0.0.0.0:8080
+    type: splunk_hec
+transforms:
+  application_log_transform:
+    inputs:
+    - application_log_ingress
+    source: |2
+
+      # assuming just service logs for now, which are published in either logfmt or json
+      structured =
+          object(parse_json(.message) ?? null) ??
+          parse_logfmt(.message) ??
+          {}
+      if !is_empty(structured) {
+          del(.message)
+          . = merge(., structured)
+      }
+      if (is_string(.mfa)) {
+          regex_object = parse_regex(.mfa, r'(?P<module>.+)\..+$') ?? {}
+          . = merge(., regex_object)
+      }
+    type: remap
