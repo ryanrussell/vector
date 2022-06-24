@@ -462,6 +462,7 @@ async fn reader_deletes_data_file_around_record_id_wraparound() {
 
             let (mut writer, mut reader, acker, ledger) =
                 create_buffer_v2_with_max_data_file_size(data_dir, 256).await;
+
             let starting_writer_file_id = ledger.get_current_writer_file_id();
             let next_writer_file_id = ledger.get_next_writer_file_id();
 

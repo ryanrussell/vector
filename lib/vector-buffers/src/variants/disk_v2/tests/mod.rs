@@ -9,9 +9,9 @@ use tokio::io::DuplexStream;
 
 use super::{
     io::{AsyncFile, Metadata, ProductionFilesystem, ReadableMemoryMap, WritableMemoryMap},
-    Buffer, DiskBufferConfigBuilder, Ledger, Reader, Writer,
+    Buffer, DiskBufferConfigBuilder, Ledger, Reader, Writer, record::RECORD_HEADER_LEN,
 };
-use crate::{buffer_usage_data::BufferUsageHandle, Acker, Bufferable};
+use crate::{buffer_usage_data::BufferUsageHandle, Acker, Bufferable, encoding::FixedEncodable};
 
 type FilesystemUnderTest = ProductionFilesystem;
 
@@ -213,6 +213,8 @@ where
 pub(crate) async fn create_buffer_v2_with_max_buffer_size<P, R>(
     data_dir: P,
     max_buffer_size: u64,
+    max_data_file_size: u64,
+    max_record_size: u64,
 ) -> (
     Writer<R, FilesystemUnderTest>,
     Reader<R, FilesystemUnderTest>,
@@ -223,12 +225,12 @@ where
     P: AsRef<Path>,
     R: Bufferable,
 {
-    // We override `max_buffer_size` directly because otherwise `build` has built-in logic that
-    // ensures it is a minimum size related to the data file size limit, etc.
-    let mut config = DiskBufferConfigBuilder::from_path(data_dir)
+    let config = DiskBufferConfigBuilder::from_path(data_dir)
+        .max_record_size(usize::try_from(max_record_size).expect("Vector only supports 64-bit architectures."))
+        .max_data_file_size(max_data_file_size)
+        .max_buffer_size(max_buffer_size)
         .build()
         .expect("creating buffer should not fail");
-    config.max_buffer_size = max_buffer_size;
     let usage_handle = BufferUsageHandle::noop();
 
     Buffer::from_config_inner(config, usage_handle)
@@ -273,8 +275,12 @@ where
     P: AsRef<Path>,
     R: Bufferable,
 {
+    let max_record_size = usize::try_from(max_data_file_size)
+        .expect("Vector only supports 64-bit architectures.");
+
     let config = DiskBufferConfigBuilder::from_path(data_dir)
         .max_data_file_size(max_data_file_size)
+        .max_record_size(max_record_size)
         .build()
         .expect("creating buffer should not fail");
     let usage_handle = BufferUsageHandle::noop();
@@ -306,4 +312,20 @@ where
     Buffer::from_config_inner(config, usage_handle)
         .await
         .expect("should not fail to create buffer")
+}
+
+pub(crate) fn get_corrected_max_record_size<T>(payload: &T) -> usize
+where
+    T: FixedEncodable,
+{
+    RECORD_HEADER_LEN + payload.encoded_size().expect("All test record types must return a valid encoded size.")
+}
+
+pub(crate) fn get_minimum_data_file_size_for_record_payload<T>(payload: &T) -> u64
+where
+    T: FixedEncodable,
+{
+    // This is just the maximum record size, compensating for the record header length.
+    let max_record_size = get_corrected_max_record_size(payload);
+    u64::try_from(max_record_size).expect("Vector only supports 64-bit architectures.")
 }
