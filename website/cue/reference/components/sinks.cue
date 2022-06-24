@@ -165,6 +165,44 @@ components: sinks: [Name=string]: {
 		}
 
 		if features.send != _|_ {
+			if features.send.framing.enabled {
+				framing: {
+					common:      false
+					description: "Configures in which way events encoded as byte frames should be separated in a payload."
+					required:    false
+					type: object: options: {
+						method: {
+							description: "The framing method."
+							required:    false
+							common:      true
+							type: string: {
+								default: features.codecs.default_framing
+								enum: {
+									bytes:               "Byte frames are concatenated."
+									character_delimited: "Byte frames are delimited by a chosen character."
+									length_delimited:    "Byte frames are encoded by adding a length header."
+									newline_delimited:   "Byte frames are delimited by a newline character."
+								}
+							}
+						}
+						character_delimited: {
+							description:   "Options for `character_delimited` framing."
+							required:      true
+							relevant_when: "method = `character_delimited`"
+							type: object: options: {
+								delimiter: {
+									description: "The character used to separate frames."
+									required:    true
+									type: ascii_char: {
+										examples: ["\n", "\t"]
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
 			if features.send.encoding.enabled {
 				encoding: {
 					description: """
@@ -209,9 +247,6 @@ components: sinks: [Name=string]: {
 													json: "JSON encoded event."
 												}
 											}
-											if codec == "ndjson" {
-												ndjson: "Newline delimited list of JSON encoded events."
-											}
 											if codec == "avro" {
 												avro: "Avro encoded event with a given schema."
 											}
@@ -221,6 +256,14 @@ components: sinks: [Name=string]: {
 							}
 						}
 						options: {
+							if codec == "avro" {
+								avro: {
+									type: object: options: {
+										schema: {}
+									}
+								}
+							}
+
 							except_fields: {
 								common:      false
 								description: "Prevent the sink from encoding the specified fields."
