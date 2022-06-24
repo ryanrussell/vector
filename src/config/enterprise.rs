@@ -103,6 +103,47 @@ impl Default for Options {
     }
 }
 
+impl Options {
+    pub fn merge(&mut self, other: Self) {
+        self.enabled = other.enabled;
+        self.enable_logs_reporting = other.enable_logs_reporting;
+        if other.site.is_some() {
+            self.site = other.site;
+        }
+        if other.region.is_some() {
+            self.region = other.region;
+        }
+        if other.endpoint.is_some() {
+            self.endpoint = other.endpoint;
+        }
+        if other.api_key.is_some() {
+            self.api_key = other.api_key;
+        }
+        self.application_key = other.application_key;
+        self.configuration_key = other.configuration_key;
+        if other.reporting_interval_secs != default_reporting_interval_secs() {
+            self.reporting_interval_secs = other.reporting_interval_secs;
+        }
+        if other.max_retries != default_max_retries() {
+            self.max_retries = other.max_retries;
+        }
+        if other.proxy != ProxyConfig::default() {
+            self.proxy = other.proxy;
+        }
+        match (self.tags.as_mut(), other.tags) {
+            (Some(current), Some(others)) => {
+                current.extend(others);
+            }
+            (Some(_), None) => {
+                // nothing to do
+            }
+            (None, others) => {
+                self.tags = others;
+            }
+        };
+    }
+}
+
 /// By default, the Datadog feature is enabled.
 const fn default_enabled() -> bool {
     true

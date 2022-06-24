@@ -209,9 +209,17 @@ impl ConfigBuilder {
 
         #[cfg(feature = "enterprise")]
         {
-            if let Some(enterprise) = with.enterprise {
-                self.enterprise = Some(enterprise);
-            }
+            match (self.enterprise.as_mut(), with.enterprise) {
+                (Some(current), Some(other)) => {
+                    current.merge(other);
+                }
+                (Some(_), None) => {
+                    // nothing to do
+                }
+                (None, other) => {
+                    self.enterprise = other;
+                }
+            };
         }
 
         self.provider = with.provider;
