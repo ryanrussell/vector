@@ -116,7 +116,11 @@ impl FixedEncodable for SizedRecord {
         if buffer.remaining_mut() < self.0 as usize + 4 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("not enough capacity to encode record: need {}, only have {}", self.0 + 4, buffer.remaining_mut()),
+                format!(
+                    "not enough capacity to encode record: need {}, only have {}",
+                    self.0 + 4,
+                    buffer.remaining_mut()
+                ),
             ));
         }
 

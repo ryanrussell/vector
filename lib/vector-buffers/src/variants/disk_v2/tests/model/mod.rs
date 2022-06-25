@@ -565,9 +565,16 @@ impl WriterModel {
         // writing the value anywhere.  `RecordWriter` clears its encoding/serialization buffers on
         // each call to `archive_record` so we don't have to do any pre/post-cleanup to avoid memory
         // growth, etc.
-        self.record_writer
-            .archive_record(1, record)
-            .expect("detached record archiving should not fail") as u64
+        let record_len = record.len();
+
+        match self.record_writer.archive_record(1, record) {
+            Ok(token) => token.serialized_len() as u64,
+            Err(_) => panic!(
+                "unexpected encode error: record_len={} max_record_size={}",
+                record_len,
+                self.ledger.config().max_record_size
+            ),
+        }
     }
 
     fn reset(&mut self) {
@@ -779,7 +786,13 @@ proptest! {
             .expect("should not fail to build runtime");
 
         let _a = install_tracing_helpers();
-        info!("New model.");
+        info!(
+            actions = actions.len(),
+            max_buffer_size = config.max_buffer_size,
+            max_data_file_size = config.max_data_file_size,
+            max_record_size = config.max_record_size,
+            "Starting model.",
+        );
 
         // We generate a new temporary directory and overwrite the data directory in the buffer
         // configuration. This allows us to use a utility that will generate a random directory each

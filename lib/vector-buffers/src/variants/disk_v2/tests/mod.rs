@@ -9,9 +9,10 @@ use tokio::io::DuplexStream;
 
 use super::{
     io::{AsyncFile, Metadata, ProductionFilesystem, ReadableMemoryMap, WritableMemoryMap},
-    Buffer, DiskBufferConfigBuilder, Ledger, Reader, Writer, record::RECORD_HEADER_LEN,
+    record::RECORD_HEADER_LEN,
+    Buffer, DiskBufferConfigBuilder, Ledger, Reader, Writer,
 };
-use crate::{buffer_usage_data::BufferUsageHandle, Acker, Bufferable, encoding::FixedEncodable};
+use crate::{buffer_usage_data::BufferUsageHandle, encoding::FixedEncodable, Acker, Bufferable};
 
 type FilesystemUnderTest = ProductionFilesystem;
 
@@ -226,7 +227,9 @@ where
     R: Bufferable,
 {
     let config = DiskBufferConfigBuilder::from_path(data_dir)
-        .max_record_size(usize::try_from(max_record_size).expect("Vector only supports 64-bit architectures."))
+        .max_record_size(
+            usize::try_from(max_record_size).expect("Vector only supports 64-bit architectures."),
+        )
         .max_data_file_size(max_data_file_size)
         .max_buffer_size(max_buffer_size)
         .build()
@@ -275,8 +278,8 @@ where
     P: AsRef<Path>,
     R: Bufferable,
 {
-    let max_record_size = usize::try_from(max_data_file_size)
-        .expect("Vector only supports 64-bit architectures.");
+    let max_record_size =
+        usize::try_from(max_data_file_size).expect("Vector only supports 64-bit architectures.");
 
     let config = DiskBufferConfigBuilder::from_path(data_dir)
         .max_data_file_size(max_data_file_size)
@@ -314,11 +317,38 @@ where
         .expect("should not fail to create buffer")
 }
 
+const fn align16(amount: usize) -> usize {
+    const SERIALIZER_ALIGNMENT: usize = 16;
+
+    if amount % SERIALIZER_ALIGNMENT != 0 {
+        // Pad ourselves to meet the alignment requirements.
+        (amount & !(SERIALIZER_ALIGNMENT - 1)) + SERIALIZER_ALIGNMENT
+    } else {
+        amount
+    }
+}
+
+const fn align16_u32(amount: u32) -> u32 {
+    const SERIALIZER_ALIGNMENT: u32 = 16;
+
+    if amount % SERIALIZER_ALIGNMENT != 0 {
+        // Pad ourselves to meet the alignment requirements.
+        (amount & !(SERIALIZER_ALIGNMENT - 1)) + SERIALIZER_ALIGNMENT
+    } else {
+        amount
+    }
+}
+
 pub(crate) fn get_corrected_max_record_size<T>(payload: &T) -> usize
 where
     T: FixedEncodable,
 {
-    RECORD_HEADER_LEN + payload.encoded_size().expect("All test record types must return a valid encoded size.")
+    let payload_len = payload
+        .encoded_size()
+        .expect("All test record types must return a valid encoded size.");
+    let total = RECORD_HEADER_LEN + payload_len;
+
+    align16(total)
 }
 
 pub(crate) fn get_minimum_data_file_size_for_record_payload<T>(payload: &T) -> u64
@@ -327,5 +357,5 @@ where
 {
     // This is just the maximum record size, compensating for the record header length.
     let max_record_size = get_corrected_max_record_size(payload);
-    u64::try_from(max_record_size).expect("Vector only supports 64-bit architectures.")
+    u64::try_from(max_record_size).expect("Vector does not support 128-bit architectures.")
 }

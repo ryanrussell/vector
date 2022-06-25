@@ -3,7 +3,11 @@ use std::{error, fmt, mem};
 use bytes::{Buf, BufMut};
 use vector_common::byte_size_of::ByteSizeOf;
 
-use crate::{encoding::FixedEncodable, EventCount};
+use crate::{
+    encoding::FixedEncodable,
+    variants::disk_v2::{record::RECORD_HEADER_LEN, tests::align16},
+    EventCount,
+};
 
 #[derive(Debug)]
 pub struct EncodeError;
@@ -32,14 +36,25 @@ pub struct Record {
     id: u32,
     size: u32,
     event_count: u32,
+    aligned_len: usize,
 }
 
 impl Record {
     pub(crate) const fn new(id: u32, size: u32, event_count: u32) -> Self {
+        // We kind of cheat here, because it's not the length of the actual record here, but the all-in length when we
+        // write it to disk, which includes a wrapper type, and an overalignment of 16. If we don't do it here, or
+        // account for it in some way, though, then our logic to figure out if the given record would be allowed based
+        // on the configured `max_record_size` won't reflect reality, since the configuration builder _does_ take the
+        // passed in `max_record_size`, less RECORD_HEADER_LEN, when calculating the number for how many bytes record
+        // encoding can use.
+        let self_len = Self::header_len() + size as usize;
+        let aligned_len = align16(RECORD_HEADER_LEN + self_len);
+
         Record {
             id,
             size,
             event_count,
+            aligned_len,
         }
     }
 
@@ -48,7 +63,7 @@ impl Record {
     }
 
     pub const fn len(&self) -> usize {
-        Self::header_len() + self.size as usize
+        self.aligned_len
     }
 }
 

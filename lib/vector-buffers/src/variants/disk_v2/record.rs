@@ -1,34 +1,16 @@
 use std::{mem, ptr::addr_of};
 
-use bytecheck::{CheckBytes, StructCheckError, ErrorBox};
+use bytecheck::{CheckBytes, ErrorBox, StructCheckError};
 use crc32fast::Hasher;
 use rkyv::{
+    boxed::ArchivedBox,
     with::{CopyOptimize, RefAsBox},
-    Archive, Serialize, boxed::ArchivedBox, Archived,
+    Archive, Archived, Serialize,
 };
 
 use super::ser::{try_as_archive, DeserializeError};
 
-const SERIALIZER_ALIGNMENT: usize = 16;
-pub const RECORD_HEADER_LEN: usize = calculate_record_header_len();
-
-const fn calculate_record_header_len() -> usize {
-    // Technically, we're calcuating the record header length _including_ the overalignment that occurs when serializing
-    // the records. We have to account for the overalignment because otherwise we'll sometimes come up short depending
-    // on the encoded length of the record and how that sums with the actual record header length.
-    //
-    // We have to do this because we use the record header length in a variety of places when calcuating if configured
-    // limits are high enough, etc.
-
-    // Archived `Record<'_>` + 8 bytes for record length delimiter.
-    let mut record_len = mem::size_of::<ArchivedRecord<'_>>() + 8;
-    if record_len % SERIALIZER_ALIGNMENT != 0 {
-        // Pad ourselves to meet the alignment requirements.
-        record_len = (record_len & !(SERIALIZER_ALIGNMENT - 1)) + SERIALIZER_ALIGNMENT;
-    }
-
-    record_len
-}
+pub const RECORD_HEADER_LEN: usize = mem::size_of::<ArchivedRecord<'_>>() + 8;
 
 /// Result of checking if a buffer contained a valid record.
 pub enum RecordStatus {
@@ -209,5 +191,9 @@ pub fn validate_record_archive(buf: &[u8], checksummer: &Hasher) -> RecordStatus
 pub fn try_as_record_archive<'a>(
     buf: &'a [u8],
 ) -> Result<&'a ArchivedRecord<'a>, DeserializeError> {
-    try_as_archive::<Record<'_>>(buf)
+    let result = try_as_archive::<Record<'_>>(buf);
+    match result {
+        Ok(archive) => Ok(archive),
+        Err(e) => panic!("failed to deser record archive: buf_len={} buf_ptr={:p} error={:?}", buf.len(), buf.as_ptr(), e),
+    }
 }

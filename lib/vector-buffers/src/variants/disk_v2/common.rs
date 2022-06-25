@@ -6,16 +6,21 @@ use std::{
 use crc32fast::Hasher;
 use snafu::Snafu;
 
-use super::{io::{Filesystem, ProductionFilesystem}, record::RECORD_HEADER_LEN};
+use super::{
+    io::{Filesystem, ProductionFilesystem},
+    record::RECORD_HEADER_LEN,
+};
 
 // We don't want data files to be bigger than 128MB, but we might end up overshooting slightly.
 pub const DEFAULT_MAX_DATA_FILE_SIZE: usize = 128 * 1024 * 1024;
 
-// We allow records to be as large as a data file.
-//
-// Practically, this means we'll allow records that are just about as big as as a single data file, but they won't
-// _exceed_ the size of a data file, even if they're the first write to a data file.
+// We allow records to be as large(*) as a data file.
 pub const DEFAULT_MAX_RECORD_SIZE: usize = DEFAULT_MAX_DATA_FILE_SIZE;
+
+// The maximum record size has to be bigger than the record header itself, since we count the record header towards
+// sizing/space usage, etc... but we also use the overaligned version here to make sure we;re similarly accounting for
+// what `rkyv` will do when we serialize a record.
+pub const MINIMUM_MAX_RECORD_SIZE: usize = align16(RECORD_HEADER_LEN + 1);
 
 // We want to ensure a reasonable time before we `fsync`/flush to disk, and 500ms should provide that for non-critical
 // workloads.
@@ -40,6 +45,17 @@ pub const MAX_FILE_ID: u16 = 6;
 
 pub(crate) fn create_crc32c_hasher() -> Hasher {
     crc32fast::Hasher::new()
+}
+
+pub(crate) const fn align16(amount: usize) -> usize {
+    const SERIALIZER_ALIGNMENT: usize = 16;
+
+    if amount % SERIALIZER_ALIGNMENT != 0 {
+        // Pad ourselves to meet the alignment requirements.
+        (amount & !(SERIALIZER_ALIGNMENT - 1)) + SERIALIZER_ALIGNMENT
+    } else {
+        amount
+    }
 }
 
 #[derive(Debug, Snafu)]
@@ -243,7 +259,7 @@ where
         let max_buffer_size = self.max_buffer_size.unwrap_or(u64::MAX);
         let max_data_file_size = self.max_data_file_size.unwrap_or_else(|| {
             u64::try_from(DEFAULT_MAX_DATA_FILE_SIZE)
-                .expect("Vector does not support 128-bit platforms.")
+                .expect("Vector does not support 128-bit architectures.")
         });
         let max_record_size = self.max_record_size.unwrap_or(DEFAULT_MAX_RECORD_SIZE);
         let write_buffer_size = self.write_buffer_size.unwrap_or(DEFAULT_WRITE_BUFFER_SIZE);
@@ -282,22 +298,22 @@ where
             });
         }
 
-        if max_record_size <= RECORD_HEADER_LEN {
+        if max_record_size <= MINIMUM_MAX_RECORD_SIZE {
             return Err(BuildError::InvalidParameter {
                 param_name: "max_record_size",
                 reason: format!(
-                    "must be greater than {} bytes",
-                    RECORD_HEADER_LEN,
+                    "must be greater than or equal to {} bytes",
+                    MINIMUM_MAX_RECORD_SIZE,
                 ),
             });
         }
 
-        let max_record_size_converted = u64::try_from(max_record_size)
-            .expect("Vector only supports 64-bit architectures.");
+        let max_record_size_converted =
+            u64::try_from(max_record_size).expect("Vector does not support 128-bit architectures.");
         if max_record_size_converted > max_data_file_size {
             return Err(BuildError::InvalidParameter {
                 param_name: "max_record_size",
-                reason:  "must be less than or equal to `max_data_file_size`".to_string(),
+                reason: "must be less than or equal to `max_data_file_size`".to_string(),
             });
         }
 
@@ -364,9 +380,7 @@ where
 mod tests {
     use proptest::{prop_assert, proptest, test_runner::Config};
 
-    use crate::variants::disk_v2::{DiskBufferConfigBuilder, record::RECORD_HEADER_LEN};
-
-    use super::BuildError;
+    use super::{BuildError, DiskBufferConfigBuilder, MINIMUM_MAX_RECORD_SIZE};
 
     #[test]
     fn basic_rejections() {
@@ -376,7 +390,10 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_data_file_size", "invalid parameter should have been `max_data_file_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_data_file_size",
+                "invalid parameter should have been `max_data_file_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
@@ -387,7 +404,10 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_data_file_size", "invalid parameter should have been `max_data_file_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_data_file_size",
+                "invalid parameter should have been `max_data_file_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
@@ -397,7 +417,10 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_buffer_size", "invalid parameter should have been `max_buffer_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_buffer_size",
+                "invalid parameter should have been `max_buffer_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
@@ -409,7 +432,10 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_buffer_size", "invalid parameter should have been `max_buffer_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_buffer_size",
+                "invalid parameter should have been `max_buffer_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
@@ -419,17 +445,23 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_record_size", "invalid parameter should have been `max_record_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_record_size",
+                "invalid parameter should have been `max_record_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
-        // Maximum record size cannot be less than or equal to the record header length.
+        // Maximum record size cannot be less than the minimum record header length.
         let result = DiskBufferConfigBuilder::from_path("/tmp/dummy/path")
-            .max_record_size(RECORD_HEADER_LEN)
+            .max_record_size(MINIMUM_MAX_RECORD_SIZE - 1)
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_record_size", "invalid parameter should have been `max_record_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_record_size",
+                "invalid parameter should have been `max_record_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
 
@@ -440,7 +472,10 @@ mod tests {
             .build();
 
         match result {
-            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(param_name, "max_record_size", "invalid parameter should have been `max_record_size`"),
+            Err(BuildError::InvalidParameter { param_name, .. }) => assert_eq!(
+                param_name, "max_record_size",
+                "invalid parameter should have been `max_record_size`"
+            ),
             _ => panic!("expected invalid parameter error"),
         }
     }
@@ -451,7 +486,7 @@ mod tests {
         fn ensure_max_buffer_size_lower_bound(max_buffer_size in 1..u64::MAX, max_record_data_file_size in 1..u64::MAX) {
             let max_data_file_size = max_record_data_file_size;
             let max_record_size = usize::try_from(max_record_data_file_size)
-                .expect("Vector only supports 64-bit architectures.");
+                .expect("Vector does not support 128-bit architectures.");
 
             let result = DiskBufferConfigBuilder::from_path("/tmp/dummy/path")
                 .max_buffer_size(max_buffer_size)
